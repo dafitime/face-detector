@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>iOS Camera Fix</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { margin: 0; overflow: hidden; background: black; }
+    video, canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      object-fit: cover;
+    }
+    #startBtn {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 3;
+      font-size: 18px;
+    }
+    #result {
+      position: absolute;
+      top: 50px;
+      left: 10px;
+      color: white;
+      z-index: 3;
+      font-family: sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <button id="startBtn">📷 Start Camera</button>
+  <p id="result">⏳ Waiting...</p>
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const startBtn = document.getElementById("startBtn");
+    const result = document.getElementById("result");
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
+    let lastBoxes = [];
+    let lastDetected = 0;
+    let lastDetectionTime = 0;
+    const detectionInterval = 150;
+
+    startBtn.addEventListener("click", async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } }
+        });
+        video.srcObject = stream;
+
+        video.addEventListener("loadedmetadata", () => {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          requestAnimationFrame(renderLoop);
+          setTimeout(detectLoop, 500);
+          startBtn.style.display = "none";
+        });
+      } catch (err) {
+        alert("Camera access failed: " + err.message);
+      }
+    });
+
+    function drawBox(box) {
+      ctx.beginPath();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "lime";
+      ctx.rect(box.x, box.y, box.w, box.h);
+      ctx.stroke();
+      ctx.font = "16px sans-serif";
+      ctx.fillStyle = "lime";
+      ctx.fillText("Face", box.x + 4, box.y - 8);
+    }
+
+    function renderLoop() {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      lastBoxes.forEach(drawBox);
+      requestAnimationFrame(renderLoop);
+    }
+
+    function detectLoop() {
+      const now = Date.now();
+      if (now - lastDetectionTime < detectionInterval) {
+        setTimeout(detectLoop, 10);
+        return;
+      }
+      lastDetectionTime = now;
+
+      const dataURL = canvas.toDataURL("image/jpeg");
+
+      fetch("/detect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: dataURL })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.boxes.length > 0) {
+          lastBoxes = data.boxes;
+          lastDetected = Date.now();
+          result.textContent = "😊 Face Detected!";
+        } else {
+          const elapsed = Date.now() - lastDetected;
+          if (elapsed > 1000) {
+            lastBoxes = [];
+            result.textContent = "🚫 No Face.";
+          } else {
+            result.textContent = "😊 (Cached) Face Detected!";
+          }
+        }
+        setTimeout(detectLoop, 10);
+      })
+      .catch(err => {
+        console.error("Detection error:", err);
+        result.textContent = "⚠️ Error";
+        setTimeout(detectLoop, 1000);
+      });
+    }
+  </script>
+</body>
+</html>
