@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>iOS Camera Fix</title>
+  <title>Face Detection</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body { margin: 0; overflow: hidden; background: black; }
@@ -13,59 +13,80 @@
       height: 100vh;
       object-fit: cover;
     }
-    #startBtn {
+    #video { z-index: 1; }
+    #canvas { z-index: 2; pointer-events: none; }
+    #result {
       position: absolute;
       top: 10px;
       left: 10px;
-      z-index: 3;
-      font-size: 18px;
-    }
-    #result {
-      position: absolute;
-      top: 50px;
-      left: 10px;
       color: white;
+      font-size: 18px;
       z-index: 3;
       font-family: sans-serif;
+    }
+    #toggleBtn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 3;
+      font-size: 18px;
     }
   </style>
 </head>
 <body>
-  <button id="startBtn">📷 Start Camera</button>
-  <p id="result">⏳ Waiting...</p>
   <video id="video" autoplay playsinline muted></video>
   <canvas id="canvas"></canvas>
+  <p id="result">⏳ Starting camera...</p>
+  <button id="toggleBtn" onclick="switchCamera()">🔄 Switch Camera</button>
 
   <script>
-    const startBtn = document.getElementById("startBtn");
-    const result = document.getElementById("result");
     const video = document.getElementById("video");
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
+    const result = document.getElementById("result");
 
     let lastBoxes = [];
     let lastDetected = 0;
     let lastDetectionTime = 0;
+    let usingRear = true;
+    let stream = null;
     const detectionInterval = 150;
 
-    startBtn.addEventListener("click", async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } }
-        });
-        video.srcObject = stream;
+    startCamera();
 
-        video.addEventListener("loadedmetadata", () => {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          requestAnimationFrame(renderLoop);
-          setTimeout(detectLoop, 500);
-          startBtn.style.display = "none";
+    function startCamera() {
+      const constraints = {
+        video: {
+          facingMode: usingRear ? { exact: "environment" } : "user"
+        }
+      };
+
+      navigator.mediaDevices.getUserMedia(constraints)
+        .then((newStream) => {
+          stream = newStream;
+          video.srcObject = newStream;
+
+          video.addEventListener("loadedmetadata", () => {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            requestAnimationFrame(renderLoop);
+            setTimeout(detectLoop, 500);
+            result.textContent = "✅ Camera ready";
+          });
+        })
+        .catch((err) => {
+          console.error("Camera error:", err);
+          result.textContent = "⚠️ Camera access failed.";
         });
-      } catch (err) {
-        alert("Camera access failed: " + err.message);
+    }
+
+    function switchCamera() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
       }
-    });
+      usingRear = !usingRear;
+      startCamera();
+    }
 
     function drawBox(box) {
       ctx.beginPath();
@@ -73,6 +94,7 @@
       ctx.strokeStyle = "lime";
       ctx.rect(box.x, box.y, box.w, box.h);
       ctx.stroke();
+
       ctx.font = "16px sans-serif";
       ctx.fillStyle = "lime";
       ctx.fillText("Face", box.x + 4, box.y - 8);
@@ -101,7 +123,7 @@
       })
       .then(res => res.json())
       .then(data => {
-        if (data.boxes.length > 0) {
+        if (data.boxes?.length > 0) {
           lastBoxes = data.boxes;
           lastDetected = Date.now();
           result.textContent = "😊 Face Detected!";
@@ -118,7 +140,7 @@
       })
       .catch(err => {
         console.error("Detection error:", err);
-        result.textContent = "⚠️ Error";
+        result.textContent = "⚠️ Detection error.";
         setTimeout(detectLoop, 1000);
       });
     }
